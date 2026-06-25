@@ -152,12 +152,12 @@ import { initializeFirestore, doc, collection,
          getDoc, getDocs, setDoc, onSnapshot }  from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 
 const firebaseConfig = {
-  apiKey:            ["AIzaSyAKLk1i2pOQ2x78E84", "-aoXB5OuEo_eyYuU"].join(""),
-  authDomain:        "psg-ph-test.firebaseapp.com",
-  projectId:         "psg-ph-test",
-  storageBucket:     "psg-ph-test.firebasestorage.app",
-  messagingSenderId: "629191138212",
-  appId:             "1:629191138212:web:2b33f84ee288cd6fa47f31"
+  apiKey:            ["AIzaSyDYKVytyeP797PVY-3j6j1Q9", "VxtubRRW_A"].join(""),
+  authDomain:        "psg-ph-product-management.firebaseapp.com",
+  projectId:         "psg-ph-product-management",
+  storageBucket:     "psg-ph-product-management.firebasestorage.app",
+  messagingSenderId: "673801973804",
+  appId:             "1:673801973804:web:6ca98b379e258f6e032189"
 };
 
 const fbApp = initializeApp(firebaseConfig);
@@ -182,8 +182,8 @@ window.fsSave = async function(key, val) {
 };
 
 // ── Firestore REST API (SDK 차단 환경 폴백 — fetch는 작동 확인됨)
-const FS_REST_BASE = 'https://firestore.googleapis.com/v1/projects/psg-ph-test/databases/(default)/documents/' + FS_COL;
-const FS_API_KEY = ['AIzaSyAKLk1i2pOQ2x78E84', '-aoXB5OuEo_eyYuU'].join('');
+const FS_REST_BASE = 'https://firestore.googleapis.com/v1/projects/psg-ph-product-management/databases/(default)/documents/' + FS_COL;
+const FS_API_KEY = ['AIzaSyDYKVytyeP797PVY-3j6j1Q9', 'VxtubRRW_A'].join('');
 
 function _toRestValue(v) {
   if (v === null || v === undefined) return { nullValue: null };
@@ -1205,7 +1205,7 @@ console.log('✅ Firebase 초기화 완료');
 
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button type="button" class="btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2)" onclick="closeClosingModal()">취소</button>
-      <button type="button" class="btn btn-success" onclick="saveClosing()">💾 마감 저장</button>
+      <button type="button" class="btn btn-success" onclick="saveMonthlyClosing()">💾 마감 저장</button>
     </div>
   </div>
 </div>
@@ -2687,8 +2687,15 @@ function showSyncStatus(msg, color) {
 // 실시간 업데이트 핸들러 (다른 기기에서 변경 시 호출됨)
 window.onFsUpdate = function(key, val) {
   switch(key) {
-    case STORE_KEY_INV:      inventory      = val; break;
-    case STORE_KEY_LOG:      logs           = val; break;
+    case STORE_KEY_INV:
+      inventory = val;
+      { let ch=false; inventory.forEach(it=>{ if(migrateMixGasItem(it)) ch=true; }); if(ch) save(STORE_KEY_INV,inventory); }
+      if(document.getElementById('page-closing')?.style.display!=='none') loadClosingSnapshot();
+      break;
+    case STORE_KEY_LOG:
+      logs = val;
+      { let ch=false; logs.forEach(it=>{ if(migrateMixGasItem(it)) ch=true; }); if(ch) save(STORE_KEY_LOG,logs); }
+      break;
     case STORE_KEY_RAW:
       rawMaterials = val;
       if (typeof rawMaterials.He === 'number') {
@@ -3156,7 +3163,8 @@ function onBSizeChange() {
 }
 
 function isMixGas(gasName) {
-  return gasName.startsWith('혼합');
+  if (!gasName) return false;
+  return gasName.startsWith('혼합') || (gasName.includes('%') && gasName.includes('+'));
 }
 
 function addMixRow() {
@@ -3268,13 +3276,13 @@ function getMixParts() {
 
 function buildMixName(parts) {
   if (!parts.length) return '';
-  return parts.map(p => p.pct ? `${p.gas} ${p.pct}%` : p.gas).join(' / ');
+  return parts.map(p => p.pct ? `${p.pct}%${p.gas}` : p.gas).join('+');
 }
 
 function getMixGasName() {
   const parts = getMixParts();
   if (!parts.length) return '';
-  return '혼합 [' + buildMixName(parts) + ']';
+  return buildMixName(parts);
 }
 
 document.getElementById('bGas').addEventListener('change', onBGasChange);
@@ -3349,7 +3357,10 @@ const GAS_LOT_CODE = {
 function getLotCode(gas) {
   if (GAS_LOT_CODE[gas]) return GAS_LOT_CODE[gas];
   if (isMixGas(gas)) {
-    // 혼합 [He 10% / N₂ 90%] → MIX-HE-N2
+    if (!gas.startsWith('혼합')) {
+      const parts = gas.split('+').map(p => { const m = p.match(/^\d+(?:\.\d+)?%(.+)$/); return m ? m[1] : p; });
+      return 'MIX-' + parts.join('-').toUpperCase();
+    }
     const parts = gas.replace('혼합 [','').replace(']','').split(' / ').map(p=>p.split(' ')[0]);
     return 'MIX-' + parts.join('-');
   }
@@ -3658,7 +3669,7 @@ function confirmPmix() {
   }
 
   // 가스명 생성
-  const gasName = '혼합 [' + parts.map(p => `${p.gas} ${p.bal ? 'Balance' : p.pct + '%'}`).join(' / ') + ']';
+  const gasName = buildMixName(parts.map(p => ({ gas: p.gas, pct: p.bal ? null : p.pct })));
 
   // 타겟 select에 옵션 추가하고 선택
   const sel = document.getElementById(pmixTargetSel);
@@ -5684,7 +5695,15 @@ function getRawKey(gasName) {
 
 // 혼합가스 성분 파싱: "혼합 [He 5% / N₂ 90% / CO₂ 5%]" → [{sym, pct}]
 function parseMixComponents(gasName) {
-  if (!gasName || !gasName.startsWith('혼합')) return [];
+  if (!gasName) return [];
+  if (!gasName.startsWith('혼합') && isMixGas(gasName)) {
+    return gasName.split('+').map(p => {
+      const m = p.trim().match(/^(\d+(?:\.\d+)?)%(.+)$/);
+      if (m) return { sym: m[2].trim(), pct: parseFloat(m[1]) };
+      return { sym: p.trim(), pct: 0 };
+    });
+  }
+  if (!gasName.startsWith('혼합')) return [];
   const m = gasName.match(/\[(.+)\]/);
   if (!m) return [];
   return m[1].split('/').map(p => {
@@ -5695,6 +5714,45 @@ function parseMixComponents(gasName) {
   });
 }
 
+
+// ── 혼합가스 품명 변환 헬퍼 ──────────────────────────────────
+function convertMixName(oldName) {
+  if (!oldName || !oldName.startsWith('혼합')) return oldName;
+  const m = oldName.match(/\[(.+)\]/);
+  if (!m) return oldName;
+  const parts = m[1].split('/').map(s => s.trim());
+  return parts.map((s, idx) => {
+    const isLast = idx === parts.length - 1;
+    const m2 = s.match(/^(.+?)\s+(\d+(?:\.\d+)?)%$/);
+    if (m2) return isLast ? m2[1].trim() : `${m2[2]}%${m2[1].trim()}`;
+    const m3 = s.match(/^(.+?)\s+Balance$/i);
+    if (m3) return m3[1].trim();
+    return s;
+  }).join('+');
+}
+function stripLastPct(name) {
+  if (!name || name.startsWith('혼합') || !isMixGas(name)) return name;
+  const parts = name.split('+');
+  if (parts.length < 2) return name;
+  const last = parts[parts.length - 1];
+  const m = last.match(/^(\d+(?:\.\d+)?)%(.+)$/);
+  if (m) parts[parts.length - 1] = m[2];
+  return parts.join('+');
+}
+// 단일 항목 변환 (Firebase 수신 즉시 처리)
+function migrateMixGasItem(item) {
+  if (!item || !item.gas) return false;
+  let changed = false;
+  if (item.gas.startsWith('혼합')) {
+    item.gas = convertMixName(item.gas); changed = true;
+  } else if (isMixGas(item.gas)) {
+    const f = stripLastPct(item.gas);
+    if (f !== item.gas) { item.gas = f; changed = true; }
+  }
+  // PSG-PH → 47L 규격 변환
+  if (item.size === 'PSG-PH') { item.size = '47L'; changed = true; }
+  return changed;
+}
 // 성분 기호 → 원재료 키 매핑
 function symToRawKey(sym) {
   const s = sym.toUpperCase();
@@ -6200,42 +6258,40 @@ function renderCylRawTiles() {
   const wrap = document.getElementById('cylRawTiles');
   if (!wrap) return;
 
-  const h2  = rawMaterials.H2  || { btl:0, kg:0 };
-  const o2  = rawMaterials.O2  || { btl:0, kg:0 };
-  const co2Kg = rawMaterials.CO2 || 0;
-
-  const h2KgPerBtl = cylKgPerBtl(H2_DENSITY);
-  const o2KgPerBtl = cylKgPerBtl(O2_DENSITY);
-  const co2Btl     = co2Kg / CO2_KG_PER_BTL;
+  const CH4_DENSITY = 0.668;
+  const h2KgPerBtl  = cylKgPerBtl(H2_DENSITY);
+  const o2KgPerBtl  = cylKgPerBtl(O2_DENSITY);
+  const ch4KgPerBtl = cylKgPerBtl(CH4_DENSITY);
+  const h2WasteKg   = pvtM3(CYL_VOL_L, CYL_WASTE_BAR) * H2_DENSITY;
+  const o2WasteKg   = pvtM3(CYL_VOL_L, CYL_WASTE_BAR) * O2_DENSITY;
+  const ch4WasteKg  = pvtM3(CYL_VOL_L, CYL_WASTE_BAR) * CH4_DENSITY;
 
   const cylInfo = [
-    { label:'H₂ (수소)', color:'var(--accent2)',
-      btl: h2.btl, kgAvail: h2.btl * h2KgPerBtl + h2.kg,
-      kgPerBtl: h2KgPerBtl, unit:'47L/130bar',
-      wasteKg: pvtM3(CYL_VOL_L, CYL_WASTE_BAR) * H2_DENSITY },
-    { label:'O₂ (산소)', color:'var(--warn)',
-      btl: o2.btl, kgAvail: o2.btl * o2KgPerBtl + o2.kg,
-      kgPerBtl: o2KgPerBtl, unit:'47L/130bar',
-      wasteKg: pvtM3(CYL_VOL_L, CYL_WASTE_BAR) * O2_DENSITY },
-    { label:'CO₂', color:'var(--teal)',
-      btl: Math.floor(co2Btl), kgAvail: co2Kg,
-      kgPerBtl: CO2_KG_PER_BTL, unit:'20kg/병',
-      wasteKg: CO2_WASTE_KG },
+    { label:'H₂ 공업용',  key:'H2_industrial',  color:'#f0883e', kgPerBtl:h2KgPerBtl,     unit:'47L/130bar', wasteKg:h2WasteKg },
+    { label:'H₂ 고순도',  key:'H2_pure',         color:'#f0883e', kgPerBtl:h2KgPerBtl,     unit:'47L/130bar', wasteKg:h2WasteKg },
+    { label:'O₂ 공업용',  key:'O2_industrial',  color:'#39d353', kgPerBtl:o2KgPerBtl,     unit:'47L/130bar', wasteKg:o2WasteKg },
+    { label:'O₂ 고순도',  key:'O2_pure',         color:'#39d353', kgPerBtl:o2KgPerBtl,     unit:'47L/130bar', wasteKg:o2WasteKg },
+    { label:'CO₂ 공업용', key:'CO2_industrial', color:'#58a6ff', kgPerBtl:CO2_KG_PER_BTL, unit:'20kg/병',   wasteKg:CO2_WASTE_KG },
+    { label:'CO₂ 고순도', key:'CO2_pure',        color:'#58a6ff', kgPerBtl:CO2_KG_PER_BTL, unit:'20kg/병',   wasteKg:CO2_WASTE_KG },
+    { label:'CH₄ (메탄)', key:'CH4',             color:'#b08060', kgPerBtl:ch4KgPerBtl,   unit:'47L/130bar', wasteKg:ch4WasteKg },
   ];
 
   wrap.innerHTML = cylInfo.map(g => {
-    const pct = g.kgPerBtl > 0 ? Math.min(100, Math.round(g.kgAvail / (g.kgPerBtl * Math.max(g.btl,1)) * 100)) : 0;
+    const mat = rawMaterials[g.key] || { btl:0, kg:0 };
+    const btl = mat.btl || 0;
+    const kgAvail = btl * g.kgPerBtl + (mat.kg || 0);
+    const pct = g.kgPerBtl > 0 && btl > 0 ? Math.min(100, Math.round(kgAvail / (g.kgPerBtl * btl) * 100)) : 0;
     const barColor = pct >= 40 ? '#39d353' : pct >= 15 ? '#d29922' : '#f85149';
-    const warnLow  = g.kgAvail <= g.wasteKg && g.kgAvail > 0;
+    const warnLow  = kgAvail <= g.wasteKg && kgAvail > 0;
     return `<div style="background:var(--bg3);border:1px solid ${warnLow?'var(--warn)':'var(--border)'};border-radius:8px;padding:12px 16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <span style="font-size:11px;font-weight:700;color:${g.color};letter-spacing:.06em">${g.label}</span>
         <span style="font-size:10px;color:var(--text3)">${g.unit}</span>
       </div>
       <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
-        <span style="font-family:var(--mono);font-size:22px;font-weight:700;color:${g.color}">${g.btl}</span>
+        <span style="font-family:var(--mono);font-size:22px;font-weight:700;color:${g.color}">${btl}</span>
         <span style="font-size:11px;color:var(--text3)">병</span>
-        <span style="font-size:11px;color:var(--text3);margin-left:4px">= ${g.kgAvail.toFixed(2)} kg</span>
+        <span style="font-size:11px;color:var(--text3);margin-left:4px">= ${kgAvail.toFixed(2)} kg</span>
       </div>
       <div style="font-size:10px;color:var(--text3);margin-bottom:5px">1병=${g.kgPerBtl.toFixed(2)}kg / 폐기기준 ${g.wasteKg.toFixed(1)}kg</div>
       ${warnLow ? `<div style="font-size:11px;color:var(--warn);font-weight:700">⚠️ 잔량 부족 — 교체 필요</div>` : ''}
@@ -7759,13 +7815,23 @@ const AN_TEMPLATES = {
 function getAnTemplate(gas) {
   if (!gas) return AN_TEMPLATES.default || [];
 
-  // 혼합가스: 품목명에서 성분 파싱해서 자동 생성
-  // 형식: "혼합 [He 5% / N₂ 95%]"
-  if (gas.startsWith('혼합')) {
+  // 혼합가스: 구 포맷(혼합 [...]) + 신 포맷(5%CO₂+25%N₂+He) 모두 처리
+  if (isMixGas(gas)) {
+    if (!gas.startsWith('혼합')) {
+      return gas.split('+').map(p => {
+        p = p.trim();
+        const m = p.match(/^(\d+(?:\.\d+)?)%(.+)$/);
+        if (m) {
+          const n = parseFloat(m[1]);
+          const numStr = isNaN(n) ? m[1] : n.toFixed(1);
+          return { name: m[2].trim(), unit: '%', spec: numStr, value: numStr };
+        }
+        return { name: p, unit: '%', spec: 'Balance', value: 'Balance' };
+      });
+    }
     const match = gas.match(/\[(.+)\]/);
     if (match) {
       const parts = match[1].split('/').map(s => s.trim());
-      // 기존 명시적 Balance 존재 여부 확인
       const hasBalance = parts.some(p => p.toLowerCase().includes('balance') || p.toLowerCase().includes('bal'));
       return parts.map((p, idx) => {
         const tokens = p.split(' ');
@@ -7774,17 +7840,11 @@ function getAnTemplate(gas) {
         const isExplicitBal = valStr === '' || p.toLowerCase().includes('balance') || p.toLowerCase().includes('bal');
         const isAutoBal     = !hasBalance && idx === parts.length - 1 && parts.length >= 2;
         const isBalance = isExplicitBal || isAutoBal;
-        // 숫자값은 소수점 1자리로 포맷 (5 → 5.0, 35 → 35.0, 5.123 → 5.1)
         const numStr = isBalance ? '' : (() => {
           const n = parseFloat(valStr.replace('%',''));
           return isNaN(n) ? valStr.replace('%','') : n.toFixed(1);
         })();
-        return {
-          name,
-          unit: '%',
-          spec: isBalance ? 'Balance' : numStr,
-          value: isBalance ? 'Balance' : numStr
-        };
+        return { name, unit: '%', spec: isBalance ? 'Balance' : numStr, value: isBalance ? 'Balance' : numStr };
       });
     }
     return [{ name: '성분1', unit: '%', spec: '' }, { name: '성분2', unit: '%', spec: '' }];
@@ -8680,7 +8740,7 @@ function openCertModal(entry) {
   certTargetEntry = entry;
   // Air는 21% O₂ + N₂ 혼합가스이므로 혼합가스 양식 사용
   const isAir = entry.gas.toLowerCase().includes('air') || entry.gas.startsWith('Air');
-  const isMix = entry.gas.startsWith('혼합') || isAir;
+  const isMix = isMixGas(entry.gas) || isAir;
   const productName = gasToProductName(entry.gas);
 
   // LOT 정보 표시
@@ -8865,7 +8925,7 @@ async function generateCertExcel(entry, company, issueDate, selectedCyls, valveT
   valveType    = valveType    || 'W22 - # -RH';
   // Air도 혼합가스 양식(CERT_TPL_MIX) 사용 — 21% O₂ + N₂ 혼합기체
   const isAir  = entry.gas.toLowerCase().includes('air') || entry.gas.startsWith('Air');
-  const isMix  = entry.gas.startsWith('혼합') || isAir;
+  const isMix  = isMixGas(entry.gas) || isAir;
   fillPressure = fillPressure != null ? fillPressure : (isMix && !isAir ? 110 : 120);
 
   // Product Name 변환
@@ -9347,7 +9407,25 @@ async function generateCertExcel(entry, company, issueDate, selectedCyls, valveT
             cells['M21'] = { t:'s', v: addShared(specStr) };
           }
         }
-        // Y21 (분析치)은 빈칸으로 두고 직접 기입
+        // Y21 — 분析치: valStr → specStr → 가스명 순도 순으로 fallback
+        let y21Str = valStr || specStr;
+        if (!y21Str) {
+          const g = entry.gas || '';
+          if (g.includes('N60'))           y21Str = '99.9999';
+          else if (g.includes('N55'))      y21Str = '99.9995';
+          else if (g.includes('초고순도')) y21Str = '99.999';
+          else if (g.includes('고순도'))   y21Str = '99.999';
+          else if (g.includes('공업용'))   y21Str = '99.0';
+        }
+        if (y21Str) {
+          const y21Num = parseFloat(y21Str);
+          if (!isNaN(y21Num)) {
+            const fixed = formatMin1Decimal(y21Num);
+            cells['Y21'] = { t:'s', v: addShared(isPercent ? `${fixed} %` : fixed) };
+          } else {
+            cells['Y21'] = { t:'s', v: addShared(y21Str) };
+          }
+        }
       } else {
         // Row 22~25 — 큰 병합셀 (M:X, Y:AJ), 소수점 최소 1자리
         if (specStr) {
@@ -9391,6 +9469,9 @@ async function generateCertExcel(entry, company, issueDate, selectedCyls, valveT
       ci++;
     }
   }
+  // 수량 셀 직접 기입 (수식 대체): 순수가스=I37, 혼합가스=I35
+  if (isMix) cells['I35'] = { t:'n', v: cyls.length };
+  else        cells['I37'] = { t:'n', v: cyls.length };
 
   // ── 분석자 섹션 — O41=':', P41=분석자 이름 (PURE) / O39=':', P39=이름 (MIX)
   // 양식의 B41(또는 B39)에는 "Reviewed & Approved" 라벨이 이미 있음
@@ -10266,7 +10347,7 @@ function updateClosingSummary(gasKey) {
   `;
 }
 
-function saveClosing() {
+function saveMonthlyClosing() {
   const ym = document.getElementById('closingYM').value;
   if (!ym) { alert('마감월을 선택해주세요.'); return; }
 
