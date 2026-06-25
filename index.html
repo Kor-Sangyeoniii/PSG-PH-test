@@ -440,6 +440,7 @@ console.log('✅ Firebase 초기화 완료');
         </div>
         <!-- 입고 버튼 -->
         <button class="btn btn-success btn-sm" onclick="showRawInModal()">+ 원재료 입고</button>
+        <button class="btn btn-sm" onclick="openSogeupModal()" style="background:var(--bg4);border:1px solid var(--border2);color:var(--accent2)">📊 소급 차감 적용</button>
       </div>
     </div>
 
@@ -450,6 +451,21 @@ console.log('✅ Firebase 초기화 완료');
     <!-- 실린더 원재료 타일 (H₂, O₂, CO₂) -->
     <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.08em;margin-bottom:8px">실린더 원재료</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px" id="cylRawTiles"></div>
+
+    <!-- He/N₂/Ar 소급 차감 모달 -->
+    <div id="sogeupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10003;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:500px;width:100%;margin-top:8vh">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700">📊 He/N₂/Ar 소급 차감</div>
+          <button onclick="closeSogeupModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">×</button>
+        </div>
+        <div id="sogeupPreviewBody"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button class="btn btn-sm" onclick="closeSogeupModal()" style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2)">취소</button>
+          <button class="btn btn-sm btn-success" onclick="applySogeup()">✅ 소급 차감 적용</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 실린더 원재료 1병 소모 모달 -->
     <div id="rawConsumeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10002;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
@@ -487,6 +503,10 @@ console.log('✅ Firebase 초기화 완료');
         <button onclick="hideRawInModal()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer">×</button>
       </div>
       <div class="field">
+        <label>입고 일자</label>
+        <input type="date" id="rawInDate" style="width:100%">
+      </div>
+      <div class="field">
         <label>원재료 종류</label>
         <select id="rawGasSel" onchange="onRawGasSelChange()" style="width:100%">
           <optgroup label="He (헬륨)">
@@ -503,6 +523,19 @@ console.log('✅ Firebase 초기화 완료');
             <option value="CO2">CO₂ — kg (20kg/병)</option>
           </optgroup>
         </select>
+      </div>
+      <!-- He ISO Tank 전용: Invoice kg + 최초 계근값 -->
+      <div id="rawFieldHeMeta" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div class="field" style="margin-bottom:0">
+            <label>Invoice kg <span style="color:var(--text3);font-size:10px">(공식 입고량)</span></label>
+            <input type="number" id="rawInvoiceKg" min="0" step="0.1" placeholder="kg" style="width:100%">
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>최초 계근값 (kg) <span style="color:var(--text3);font-size:10px">(실측)</span></label>
+            <input type="number" id="rawInitialWeight" min="0" step="0.1" placeholder="kg" style="width:100%">
+          </div>
+        </div>
       </div>
 
       <!-- ISO Tank 번호 (He_tank 선택 시에만 표시) -->
@@ -5780,6 +5813,153 @@ function migrateMixGasItem(item) {
   if (item.size === 'PSG-PH') { item.size = '47L'; changed = true; }
   return changed;
 }
+
+// ══════ He/N₂/Ar 소급 차감 (6월 1일 이후 생산분) ══════
+const SOGEUP_APPLIED_KEY = 'gasims_sogeup_applied_v1';
+const SOGEUP_FROM_DATE   = '2026-06-01';
+
+function getSogeupApplied() {
+  try { return JSON.parse(localStorage.getItem(SOGEUP_APPLIED_KEY) || 'false'); } catch(e) { return false; }
+}
+
+// 6월 1일 이후 생산 로그에서 He/N₂/Ar 소모량 계산
+function calcSogeupConsumption() {
+  const totals = { He: 0, N2: 0, Ar: 0 };
+  const prodLogs = logs.filter(l => l.type === 'produce' && l.date >= SOGEUP_FROM_DATE);
+
+  prodLogs.forEach(l => {
+    const gas     = l.gas || '';
+    const sizeL   = parseFloat(l.size)  || 47;
+    const fillBar = parseFloat(l.fillBar) || 130;
+    const qty     = Math.abs(l.dFull || l.qty || 0);
+    if (qty <= 0) return;
+
+    const consumption = calcProductionConsumption(gas, sizeL, fillBar, qty);
+    consumption.forEach(c => {
+      if (c.key === 'He') totals.He += c.kgTotal;
+      if (c.key === 'N2') totals.N2 += c.kgTotal;
+      if (c.key === 'Ar') totals.Ar += c.kgTotal;
+    });
+  });
+
+  return { totals, prodCount: prodLogs.length };
+}
+
+// 소급 차감 미리보기 모달
+function openSogeupModal() {
+  if (getSogeupApplied()) {
+    alert('소급 차감이 이미 적용되어 있어요.\n관리자 탭에서 소급 기록을 확인할 수 있어요.');
+    return;
+  }
+
+  const { totals, prodCount } = calcSogeupConsumption();
+  const he = rawMaterials.He || {};
+  const heTankKg = Array.isArray(he.tanks) ? he.tanks.reduce((s,t)=>s+(t.kg_remaining||0),0) : 0;
+  const n2Kg = (rawMaterials.N2?.tanks||[]).reduce((s,t)=>s+(t.kg_remaining||0),0);
+  const arKg = (rawMaterials.Ar?.tanks||[]).reduce((s,t)=>s+(t.kg_remaining||0),0);
+
+  const rows = [
+    { label:'He', consume: totals.He, current: heTankKg },
+    { label:'N₂', consume: totals.N2, current: n2Kg },
+    { label:'Ar',  consume: totals.Ar,  current: arKg },
+  ].filter(r => r.consume > 0);
+
+  if (rows.length === 0) {
+    alert(`${SOGEUP_FROM_DATE} 이후 He/N₂/Ar 소모 내역이 없어요.`);
+    return;
+  }
+
+  const tableRows = rows.map(r => `
+    <tr>
+      <td style="padding:8px 12px;font-weight:700">${r.label}</td>
+      <td style="padding:8px 12px;font-family:var(--mono);text-align:right">${r.current.toFixed(2)} kg</td>
+      <td style="padding:8px 12px;font-family:var(--mono);text-align:right;color:var(--danger)">−${r.consume.toFixed(2)} kg</td>
+      <td style="padding:8px 12px;font-family:var(--mono);text-align:right;color:${(r.current-r.consume)<0?'var(--danger)':'var(--accent)'}">
+        ${(r.current - r.consume).toFixed(2)} kg
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('sogeupPreviewBody').innerHTML = `
+    <p style="color:var(--text3);font-size:13px;margin-bottom:12px">
+      📅 적용 기간: <strong>${SOGEUP_FROM_DATE}</strong> 이후 생산 <strong>${prodCount}건</strong>
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border)">
+          <th style="padding:6px 12px;text-align:left;color:var(--text3)">원재료</th>
+          <th style="padding:6px 12px;text-align:right;color:var(--text3)">현재 잔량</th>
+          <th style="padding:6px 12px;text-align:right;color:var(--text3)">차감량</th>
+          <th style="padding:6px 12px;text-align:right;color:var(--text3)">차감 후</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+    <p style="color:var(--warn);font-size:11px;margin-top:8px">⚠️ 한 번만 실행 가능 — 적용 후 취소 불가</p>`;
+
+  document.getElementById('sogeupModal').style.display = 'flex';
+}
+
+function closeSogeupModal() {
+  document.getElementById('sogeupModal').style.display = 'none';
+}
+
+function applySogeup() {
+  if (getSogeupApplied()) { alert('이미 적용됨'); return; }
+
+  const { totals, prodCount } = calcSogeupConsumption();
+
+  // He 차감 — 잔량 많은 탱크 순으로
+  if (totals.He > 0) {
+    const he = rawMaterials.He || { tanks: [] };
+    let remain = totals.He;
+    (he.tanks || []).sort((a,b) => b.kg_remaining - a.kg_remaining).forEach(t => {
+      if (remain <= 0) return;
+      const take = Math.min(remain, t.kg_remaining);
+      t.kg_remaining = Math.max(0, t.kg_remaining - take);
+      remain -= take;
+    });
+    rawMaterials.He = he;
+  }
+
+  // N₂ 차감
+  if (totals.N2 > 0) {
+    const mat = rawMaterials.N2 || { tanks: [] };
+    let remain = totals.N2;
+    (mat.tanks || []).sort((a,b) => b.kg_remaining - a.kg_remaining).forEach(t => {
+      if (remain <= 0) return;
+      const take = Math.min(remain, t.kg_remaining);
+      t.kg_remaining = Math.max(0, t.kg_remaining - take);
+      remain -= take;
+    });
+    rawMaterials.N2 = mat;
+  }
+
+  // Ar 차감
+  if (totals.Ar > 0) {
+    const mat = rawMaterials.Ar || { tanks: [] };
+    let remain = totals.Ar;
+    (mat.tanks || []).sort((a,b) => b.kg_remaining - a.kg_remaining).forEach(t => {
+      if (remain <= 0) return;
+      const take = Math.min(remain, t.kg_remaining);
+      t.kg_remaining = Math.max(0, t.kg_remaining - take);
+      remain -= take;
+    });
+    rawMaterials.Ar = mat;
+  }
+
+  save(STORE_KEY_RAW, rawMaterials);
+
+  // 적용 기록 저장 (재실행 방지)
+  const record = { appliedAt: now(), fromDate: SOGEUP_FROM_DATE,
+    prodCount, totals: { He: totals.He, N2: totals.N2, Ar: totals.Ar } };
+  localStorage.setItem(SOGEUP_APPLIED_KEY, JSON.stringify(record));
+  save('gasims_sogeup_applied_v1', record);
+
+  closeSogeupModal();
+  renderRawTiles();
+  alert(`✅ 소급 차감 완료!\nHe: ${totals.He.toFixed(2)}kg / N₂: ${totals.N2.toFixed(2)}kg / Ar: ${totals.Ar.toFixed(2)}kg\n생산 ${prodCount}건 반영`);
+}
+
 // 성분 기호 → 원재료 키 매핑
 function symToRawKey(sym) {
   const s = sym.toUpperCase();
@@ -5808,8 +5988,8 @@ function calcProductionConsumption(gas, sizeL, fillBar, qty) {
   const result = [];
   const T = 25;
 
-  if (gas.startsWith('혼합')) {
-    // 혼합가스: 성분별 비율로 분배
+  if (isMixGas(gas)) {
+    // 혼합가스: 성분별 비율로 분배 (구/신 포맷 모두 지원)
     const comps = parseMixComponents(gas);
     const totalM3PerCyl = pvtM3(sizeL, fillBar); // 총 충전량
     comps.forEach(c => {
@@ -6000,12 +6180,18 @@ function deductRaw(gas, m3, heSrc) {
 // 입고 모달
 function showRawInModal() {
   document.getElementById('rawInModal').style.display = 'flex';
+  document.getElementById('rawInDate').value = today();
   onRawGasSelChange();
 }
 function hideRawInModal() {
   document.getElementById('rawInModal').style.display = 'none';
   document.getElementById('rawKg').value   = '';
   document.getElementById('rawNote').value = '';
+  document.getElementById('rawInDate').value = '';
+  const invEl = document.getElementById('rawInvoiceKg');
+  if (invEl) invEl.value = '';
+  const wtEl = document.getElementById('rawInitialWeight');
+  if (wtEl) wtEl.value = '';
   const tnoEl = document.getElementById('rawTankNo');
   if (tnoEl) tnoEl.value = '';
 }
@@ -6021,6 +6207,8 @@ function onRawGasSelChange() {
 
   fieldCart.style.display = gas === 'He_cart' ? 'block' : 'none';
   fieldKg.style.display   = gas === 'He_cart' ? 'none'  : 'block';
+  const fieldHeMeta = document.getElementById('rawFieldHeMeta');
+  if (fieldHeMeta) fieldHeMeta.style.display = gas === 'He_tank' ? 'block' : 'none';
 
   // ISO Tank 번호는 He_tank, N2, Ar 에서 표시
   const showTank = gas === 'He_tank' || gas === 'N2' || gas === 'Ar';
