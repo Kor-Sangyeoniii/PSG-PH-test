@@ -6092,7 +6092,8 @@ function addRawMaterial() {
     const cur = rawMaterials[gas] || { btl:0, kg:0 };
     rawMaterials[gas] = { btl: cur.btl+btlQty, kg: cur.kg };
     save(STORE_KEY_RAW, rawMaterials);
-    cartLogs.push({ id:uid(), date:today(), time:now(), type:'raw_in',
+    const _cylDate = document.getElementById('rawInDate').value || today();
+    cartLogs.push({ id:uid(), date:_cylDate, time:now(), type:'raw_in',
       gas, btl:btlQty, kg:Math.round(btlQty*kgPerBtl*100)/100, note,
       memo:`${gas} 원재료 +${btlQty}병` });
 
@@ -6101,7 +6102,8 @@ function addRawMaterial() {
     if (!kg||kg<=0) { alert('kg를 입력해주세요.'); return; }
     rawMaterials.CO2 = (rawMaterials.CO2||0) + kg;
     save(STORE_KEY_RAW, rawMaterials);
-    cartLogs.push({ id:uid(), date:today(), time:now(), type:'raw_in',
+    const _co2Date = document.getElementById('rawInDate').value || today();
+    cartLogs.push({ id:uid(), date:_co2Date, time:now(), type:'raw_in',
       gas, kg, note, memo:`CO₂ 원재료 +${kg}kg` });
 
   } else {
@@ -6124,11 +6126,11 @@ function addRawMaterial() {
         existing.kg_remaining += kg;
       }
     } else {
-      mat.tanks.push({ id: uid(), no: tankNo, kg_initial: kg, kg_remaining: kg, arrivedAt: today(), note });
+      mat.tanks.push({ id: uid(), no: tankNo, kg_initial: kg, kg_remaining: kg, arrivedAt: _n2arDate, note });
     }
     rawMaterials[gas] = { ...mat };
     save(STORE_KEY_RAW, rawMaterials);
-    cartLogs.push({ id:uid(), date:today(), time:now(), type:'raw_in',
+    cartLogs.push({ id:uid(), date:_n2arDate, time:now(), type:'raw_in',
       gas, kg, tankNo, note, memo:`${gas} 탱크 [${tankNo}] 입고 +${kg}kg` });
   }
 
@@ -11039,15 +11041,10 @@ function importBackup(input) {
       orders        = load(STORE_KEY_ORDERS,    []);
       signatures    = load(STORE_KEY_SIGS,      []);
 
-      renderAll();
-
-      const st = document.getElementById('backupStatus');
-      st.style.display = 'block';
-      st.style.color   = 'var(--accent)';
-      st.textContent   = `✅ 복원 완료! 재고 ${invCount}개 · 이력 ${logCount}건 불러왔습니다.`;
-
       input.value = '';
-      alert(`✅ 데이터 복원 완료!\n재고 ${invCount}개 · 이력 ${logCount}건`);
+      alert(`✅ 데이터 복원 완료!\n재고 ${invCount}개 · 이력 ${logCount}건\n\n잠시 후 페이지가 새로고침됩니다.`);
+      // Firebase 저장 완료 후 새로고침 (폴링 덮어쓰기 방지)
+      setTimeout(() => location.reload(), 2000);
 
     } catch (err) {
       alert('❌ 파일 읽기 오류: ' + err.message);
