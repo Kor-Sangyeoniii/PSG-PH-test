@@ -450,6 +450,33 @@ console.log('✅ Firebase 초기화 완료');
     <!-- 실린더 원재료 타일 (H₂, O₂, CO₂) -->
     <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.08em;margin-bottom:8px">실린더 원재료</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px" id="cylRawTiles"></div>
+
+    <!-- 실린더 원재료 1병 소모 모달 -->
+    <div id="rawConsumeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10002;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:420px;width:100%;margin-top:8vh">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700">📦 실린더 원재료 1병 소모</div>
+          <button onclick="closeRawConsumeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">×</button>
+        </div>
+        <div id="rawConsumeTarget" style="background:var(--bg3);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:700"></div>
+        <div class="field" style="margin-bottom:12px">
+          <label>소모 날짜</label>
+          <input type="date" id="rawConsumeDate" style="width:100%">
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>소모 병 수</label>
+          <input type="number" id="rawConsumeQty" min="1" step="1" value="1" style="width:100%">
+        </div>
+        <div class="field" style="margin-bottom:16px">
+          <label>사유</label>
+          <input type="text" id="rawConsumeReason" placeholder="예: 신규 병 개봉하여 충전 사용" style="width:100%">
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-sm" onclick="closeRawConsumeModal()" style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2)">취소</button>
+          <button class="btn btn-sm btn-success" onclick="confirmRawConsume()">✅ 소모 처리</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 원재료 입고 모달 -->
@@ -6295,11 +6322,60 @@ function renderCylRawTiles() {
       </div>
       <div style="font-size:10px;color:var(--text3);margin-bottom:5px">1병=${g.kgPerBtl.toFixed(2)}kg / 폐기기준 ${g.wasteKg.toFixed(1)}kg</div>
       ${warnLow ? `<div style="font-size:11px;color:var(--warn);font-weight:700">⚠️ 잔량 부족 — 교체 필요</div>` : ''}
-      <div style="height:4px;background:var(--bg4);border-radius:2px">
+      <div style="height:4px;background:var(--bg4);border-radius:2px;margin-bottom:8px">
         <div style="height:4px;width:${pct}%;background:${barColor};border-radius:2px;transition:width .3s"></div>
       </div>
+      <button onclick="openRawConsumeModal('${g.key}','${g.label}')" style="width:100%;background:var(--bg4);border:1px solid var(--border2);color:var(--text2);border-radius:5px;padding:5px;font-size:11px;cursor:pointer">📦 1병 소모</button>
     </div>`;
   }).join('');
+}
+
+// ══════ 실린더 원재료 1병 소모 ══════
+let _rawConsumeKey = null;
+function openRawConsumeModal(key, label) {
+  _rawConsumeKey = key;
+  document.getElementById('rawConsumeTarget').textContent = label;
+  document.getElementById('rawConsumeDate').value = today();
+  document.getElementById('rawConsumeQty').value = 1;
+  document.getElementById('rawConsumeReason').value = '';
+  document.getElementById('rawConsumeModal').style.display = 'flex';
+}
+function closeRawConsumeModal() {
+  document.getElementById('rawConsumeModal').style.display = 'none';
+  _rawConsumeKey = null;
+}
+function confirmRawConsume() {
+  const key = _rawConsumeKey;
+  if (!key) return;
+  const date = document.getElementById('rawConsumeDate').value;
+  const qty  = parseInt(document.getElementById('rawConsumeQty').value) || 0;
+  const reason = document.getElementById('rawConsumeReason').value.trim();
+  if (!date) { alert('소모 날짜를 입력하세요.'); return; }
+  if (qty < 1) { alert('소모 병 수는 1 이상이어야 합니다.'); return; }
+
+  const mat = rawMaterials[key] || { btl:0, kg:0 };
+  const curBtl = mat.btl || 0;
+  if (qty > curBtl) {
+    if (!confirm(`현재 실병(${curBtl}병)보다 많은 ${qty}병을 소모 처리합니다.\n계속하시겠습니까? (재고가 음수가 됩니다)`)) return;
+  }
+  const label = document.getElementById('rawConsumeTarget').textContent;
+
+  // 실병 차감
+  rawMaterials[key] = { ...mat, btl: curBtl - qty };
+  save(STORE_KEY_RAW, rawMaterials);
+
+  // 로그 기록
+  cartLogs.push({
+    id: uid(), date: date, time: now(), type: 'raw_consume',
+    rawKey: key, rawLabel: label, qty: qty, reason: reason,
+    memo: `${label} ${qty}병 소모${reason ? ' — ' + reason : ''}`
+  });
+  save(STORE_KEY_CART_LOG, cartLogs);
+
+  renderRawTiles();
+  renderCylRawTiles();
+  closeRawConsumeModal();
+  alert(`${label} ${qty}병 소모 처리 완료`);
 }
 
 // ══════ CARTRIDGE ══════
@@ -7161,6 +7237,7 @@ function renderTodayCartLog() {
     out:    { icon:'📤', label:'출고', color:'var(--danger)' },
     ret:    { icon:'📥', label:'반납',     color:'var(--teal)' },
     raw_in: { icon:'📦', label:'원재료입고', color:'var(--purple)' },
+    raw_consume:{ icon:'📦', label:'원재료소모', color:'var(--warn)' },
     inspect:{ icon:'🔍', label:'검사완료',  color:'var(--accent2)' },
   };
   wrap.innerHTML = todays.map(l => {
