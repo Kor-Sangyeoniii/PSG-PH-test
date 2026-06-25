@@ -11021,7 +11021,7 @@ function importBackup(input) {
       ];
       allKeys.forEach(k => {
         if (data[k] !== undefined) {
-          localStorage.setItem(k, JSON.stringify(data[k]));
+          save(k, data[k]);  // localStorage + Firebase 동시 저장
         }
       });
 
