@@ -152,12 +152,12 @@ import { initializeFirestore, doc, collection,
          getDoc, getDocs, setDoc, onSnapshot }  from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 
 const firebaseConfig = {
-  apiKey:            ["AIzaSyDYKVytyeP797PVY-3j6j1Q9", "VxtubRRW_A"].join(""),
-  authDomain:        "psg-ph-product-management.firebaseapp.com",
-  projectId:         "psg-ph-product-management",
-  storageBucket:     "psg-ph-product-management.firebasestorage.app",
-  messagingSenderId: "673801973804",
-  appId:             "1:673801973804:web:6ca98b379e258f6e032189"
+  apiKey:            ["AIzaSyAKLk1i2pOQ2x78E84", "-aoXB5OuEo_eyYuU"].join(""),
+  authDomain:        "psg-ph-test.firebaseapp.com",
+  projectId:         "psg-ph-test",
+  storageBucket:     "psg-ph-test.firebasestorage.app",
+  messagingSenderId: "629191138212",
+  appId:             "1:629191138212:web:2b33f84ee288cd6fa47f31"
 };
 
 const fbApp = initializeApp(firebaseConfig);
@@ -182,8 +182,8 @@ window.fsSave = async function(key, val) {
 };
 
 // ── Firestore REST API (SDK 차단 환경 폴백 — fetch는 작동 확인됨)
-const FS_REST_BASE = 'https://firestore.googleapis.com/v1/projects/psg-ph-product-management/databases/(default)/documents/' + FS_COL;
-const FS_API_KEY = ['AIzaSyDYKVytyeP797PVY-3j6j1Q9', 'VxtubRRW_A'].join('');
+const FS_REST_BASE = 'https://firestore.googleapis.com/v1/projects/psg-ph-test/databases/(default)/documents/' + FS_COL;
+const FS_API_KEY = ['AIzaSyAKLk1i2pOQ2x78E84', '-aoXB5OuEo_eyYuU'].join('');
 
 function _toRestValue(v) {
   if (v === null || v === undefined) return { nullValue: null };
